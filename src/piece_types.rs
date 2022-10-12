@@ -25,26 +25,31 @@ impl fmt::Display for Size {
     }
 }
 
-pub enum Piece {
+pub enum PieceType {
     Red(Size),
     Green(Size),
     Blue(Size),
     Yellow(Size),
 }
 
-impl fmt::Display for Piece {
+pub struct Piece {
+    type_: PieceType,
+    id: u8, // will be 0, 1, or 2 -- may want to change to an `enum`
+}
+
+impl fmt::Display for PieceType {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Piece::Red(size) => {
+            PieceType::Red(size) => {
                 write!(f, "{} red", size)
             }
-            Piece::Green(size) => {
+            PieceType::Green(size) => {
                 write!(f, "{} green", size)
             }
-            Piece::Blue(size) => {
+            PieceType::Blue(size) => {
                 write!(f, "{} blue", size)
             }
-            Piece::Yellow(size) => {
+            PieceType::Yellow(size) => {
                 write!(f, "{} yellow", size)
             }
         }
