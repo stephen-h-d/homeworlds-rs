@@ -1,7 +1,8 @@
+use enumset::EnumSetType;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Debug)]
 pub enum Size {
     Small,
     Medium,
@@ -25,32 +26,66 @@ impl fmt::Display for Size {
     }
 }
 
-pub enum PieceType {
-    Red(Size),
-    Green(Size),
-    Blue(Size),
-    Yellow(Size),
+#[derive(EnumSetType, Debug)]
+pub enum Color {
+    Red,
+    Green,
+    Blue,
+    Yellow,
 }
 
+#[derive(Debug)]
+pub struct PieceType {
+    color: Color,
+    size: Size,
+}
+
+impl PieceType {
+    pub fn new(color: Color, size: Size) -> Self {
+        PieceType { color, size }
+    }
+
+    pub fn color(&self) -> &Color {
+        &self.color
+    }
+
+    pub fn size(&self) -> &Size {
+        &self.size
+    }
+}
+
+#[derive(Debug)]
 pub struct Piece {
     type_: PieceType,
     id: u8, // will be 0, 1, or 2 -- may want to change to an `enum`
 }
 
+impl Piece {
+    pub fn type_(&self) -> &PieceType {
+        &self.type_
+    }
+}
+
+impl Piece {
+    pub fn new(type_: PieceType, id: u8) -> Self {
+        Piece { type_, id }
+    }
+}
+
 impl fmt::Display for PieceType {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            PieceType::Red(size) => {
-                write!(f, "{} red", size)
+        match self.color {
+            Color::Red => {
+                write!(f, "{} red", self.size)
             }
-            PieceType::Green(size) => {
-                write!(f, "{} green", size)
+            Color::Green => {
+                write!(f, "{} green", self.size)
             }
-            PieceType::Blue(size) => {
-                write!(f, "{} blue", size)
+            Color::Blue => {
+                write!(f, "{} blue", self.size)
             }
-            PieceType::Yellow(size) => {
-                write!(f, "{} yellow", size)
+            Color::Yellow => {
+                write!(f, "{} yellow", self.size)
             }
         }
     }
