@@ -1,8 +1,10 @@
+use derive_new::new;
 use enumset::EnumSetType;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(PartialEq, PartialOrd, Debug)]
+#[derive(Eq, PartialEq, PartialOrd, Debug, Hash, Copy, Clone)]
 pub enum Size {
     Small,
     Medium,
@@ -26,7 +28,7 @@ impl fmt::Display for Size {
     }
 }
 
-#[derive(EnumSetType, Debug)]
+#[derive(EnumSetType, Debug, Hash)]
 pub enum Color {
     Red,
     Green,
@@ -34,17 +36,13 @@ pub enum Color {
     Yellow,
 }
 
-#[derive(Debug)]
+#[derive(new, Debug, Eq, Hash, PartialEq, Copy, Clone)]
 pub struct PieceType {
     color: Color,
     size: Size,
 }
 
 impl PieceType {
-    pub fn new(color: Color, size: Size) -> Self {
-        PieceType { color, size }
-    }
-
     pub fn color(&self) -> &Color {
         &self.color
     }
@@ -54,7 +52,7 @@ impl PieceType {
     }
 }
 
-#[derive(Debug)]
+#[derive(new, Debug, Eq, Hash, PartialEq, Copy, Clone)]
 pub struct Piece {
     type_: PieceType,
     id: u8, // will be 0, 1, or 2 -- may want to change to an `enum`
@@ -63,12 +61,6 @@ pub struct Piece {
 impl Piece {
     pub fn type_(&self) -> &PieceType {
         &self.type_
-    }
-}
-
-impl Piece {
-    pub fn new(type_: PieceType, id: u8) -> Self {
-        Piece { type_, id }
     }
 }
 
@@ -88,5 +80,24 @@ impl fmt::Display for PieceType {
                 write!(f, "{} yellow", self.size)
             }
         }
+    }
+}
+
+pub struct PieceBank {
+    pieces: HashMap<PieceType, HashSet<Piece>>,
+}
+
+impl PieceBank {
+    pub fn new() -> Self {
+        PieceBank {
+            pieces: HashMap::new(),
+        }
+    }
+
+    pub fn pop_piece(&mut self, piece_type: &PieceType) -> Option<Piece> {
+        let piece_type_set: &mut _ = self.pieces.get_mut(piece_type)?;
+        let piece = *piece_type_set.iter().next()?;
+        piece_type_set.remove(&piece);
+        Some(piece)
     }
 }

@@ -1,7 +1,7 @@
-use super::piece_types::Piece;
+use super::pieces::Piece;
 use enumset::EnumSet;
 
-use crate::piece_types::Color;
+use crate::pieces::Color;
 use std::collections::HashMap;
 
 enum PieceLoc {
@@ -101,5 +101,37 @@ impl GameState {
         self.add_valid_trade_moves(&mut result);
         self.add_valid_build_moves(&mut result);
         result
+    }
+}
+
+mod tests {
+    use crate::game_state::{GameState, Homeworld};
+    use crate::pieces::*;
+
+    #[test]
+    fn do_a_thing() {
+        let mut piece_bank = PieceBank::new();
+
+        let mut game_state = GameState {
+            homeworlds: [
+                Homeworld {
+                    stars: [
+                        piece_bank.pop_piece(&PieceType::new(Color::Red, Size::Small)),
+                        piece_bank.pop_piece(&PieceType::new(Color::Yellow, Size::Large)),
+                    ],
+                    ships: vec![],
+                },
+                Homeworld {
+                    stars: [
+                        piece_bank.pop_piece(&PieceType::new(Color::Blue, Size::Medium)),
+                        piece_bank.pop_piece(&PieceType::new(Color::Red, Size::Large)),
+                    ],
+                    ships: vec![],
+                },
+            ],
+            colonies: vec![],
+            turn: super::Player::First,
+            move_count: 0,
+        };
     }
 }
