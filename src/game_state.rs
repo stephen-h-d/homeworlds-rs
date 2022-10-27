@@ -1,7 +1,7 @@
 use super::pieces::Piece;
 use enumset::EnumSet;
 
-use crate::pieces::Color;
+use crate::pieces::{Color, PieceBank};
 use std::collections::HashMap;
 
 enum PieceLoc {
@@ -66,6 +66,7 @@ impl HasColors for Homeworld {
 }
 
 pub struct GameState {
+    bank: PieceBank,
     homeworlds: [Homeworld; 2],
     colonies: Vec<Colony>, // TODO change to ArrayVec
     turn: Player,
@@ -105,32 +106,52 @@ impl GameState {
 }
 
 mod tests {
-    use crate::game_state::{GameState, Homeworld};
+    use crate::game_state::{GameState, Homeworld, OwnedPiece, Player};
     use crate::pieces::*;
+
+    fn pop_option(bank: &mut PieceBank, type_: &PieceType) -> Option<Piece> {
+        Some(bank.pop_piece(type_).unwrap())
+    }
+
+    fn pop(bank: &mut PieceBank, type_: &PieceType) -> Piece {
+        bank.pop_piece(type_).unwrap()
+    }
 
     #[test]
     fn do_a_thing() {
-        let mut piece_bank = PieceBank::new();
+        let mut bank = PieceBank::new();
+
+        let hw1_stars = [
+            pop_option(&mut bank, &SMALL_RED),
+            pop_option(&mut bank, &LARGE_YELLOW),
+        ];
+        let hw1_ship = OwnedPiece {
+            piece: pop(&mut bank, &LARGE_GREEN),
+            owner: Player::First,
+        };
+        let hw2_stars = [
+            pop_option(&mut bank, &MEDIUM_BLUE),
+            pop_option(&mut bank, &LARGE_RED),
+        ];
+        let hw2_ship = OwnedPiece {
+            piece: pop(&mut bank, &LARGE_GREEN),
+            owner: Player::Second,
+        };
 
         let mut game_state = GameState {
+            bank,
             homeworlds: [
                 Homeworld {
-                    stars: [
-                        piece_bank.pop_piece(&PieceType::new(Color::Red, Size::Small)),
-                        piece_bank.pop_piece(&PieceType::new(Color::Yellow, Size::Large)),
-                    ],
-                    ships: vec![],
+                    stars: hw1_stars,
+                    ships: vec![hw1_ship],
                 },
                 Homeworld {
-                    stars: [
-                        piece_bank.pop_piece(&PieceType::new(Color::Blue, Size::Medium)),
-                        piece_bank.pop_piece(&PieceType::new(Color::Red, Size::Large)),
-                    ],
-                    ships: vec![],
+                    stars: hw2_stars,
+                    ships: vec![hw2_ship],
                 },
             ],
             colonies: vec![],
-            turn: super::Player::First,
+            turn: Player::First,
             move_count: 0,
         };
     }

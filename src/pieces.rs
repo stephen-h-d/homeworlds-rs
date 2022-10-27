@@ -1,10 +1,13 @@
 use derive_new::new;
 use enumset::EnumSetType;
-use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::fmt::Formatter;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
-#[derive(Eq, PartialEq, PartialOrd, Debug, Hash, Copy, Clone)]
+#[derive(Eq, PartialEq, PartialOrd, Debug, Hash, Copy, Clone, EnumIter)]
 pub enum Size {
     Small,
     Medium,
@@ -28,7 +31,7 @@ impl fmt::Display for Size {
     }
 }
 
-#[derive(EnumSetType, Debug, Hash)]
+#[derive(EnumSetType, Debug, Hash, EnumIter)]
 pub enum Color {
     Red,
     Green,
@@ -38,9 +41,69 @@ pub enum Color {
 
 #[derive(new, Debug, Eq, Hash, PartialEq, Copy, Clone)]
 pub struct PieceType {
-    color: Color,
     size: Size,
+    color: Color,
 }
+
+pub const SMALL_RED: PieceType = PieceType {
+    size: Size::Small,
+    color: Color::Red,
+};
+
+pub const MEDIUM_RED: PieceType = PieceType {
+    size: Size::Medium,
+    color: Color::Red,
+};
+
+pub const LARGE_RED: PieceType = PieceType {
+    size: Size::Large,
+    color: Color::Red,
+};
+
+pub const SMALL_YELLOW: PieceType = PieceType {
+    size: Size::Small,
+    color: Color::Yellow,
+};
+
+pub const MEDIUM_YELLOW: PieceType = PieceType {
+    size: Size::Medium,
+    color: Color::Yellow,
+};
+
+pub const LARGE_YELLOW: PieceType = PieceType {
+    size: Size::Large,
+    color: Color::Yellow,
+};
+
+pub const SMALL_GREEN: PieceType = PieceType {
+    size: Size::Small,
+    color: Color::Green,
+};
+
+pub const MEDIUM_GREEN: PieceType = PieceType {
+    size: Size::Medium,
+    color: Color::Green,
+};
+
+pub const LARGE_GREEN: PieceType = PieceType {
+    size: Size::Large,
+    color: Color::Green,
+};
+
+pub const SMALL_BLUE: PieceType = PieceType {
+    size: Size::Small,
+    color: Color::Blue,
+};
+
+pub const MEDIUM_BLUE: PieceType = PieceType {
+    size: Size::Medium,
+    color: Color::Blue,
+};
+
+pub const LARGE_BLUE: PieceType = PieceType {
+    size: Size::Large,
+    color: Color::Blue,
+};
 
 impl PieceType {
     pub fn color(&self) -> &Color {
@@ -52,7 +115,7 @@ impl PieceType {
     }
 }
 
-#[derive(new, Debug, Eq, Hash, PartialEq, Copy, Clone)]
+#[derive(new, Debug, Eq, Hash, PartialEq)]
 pub struct Piece {
     type_: PieceType,
     id: u8, // will be 0, 1, or 2 -- may want to change to an `enum`
@@ -84,20 +147,28 @@ impl fmt::Display for PieceType {
 }
 
 pub struct PieceBank {
-    pieces: HashMap<PieceType, HashSet<Piece>>,
+    pieces: HashMap<PieceType, Vec<Piece>>,
 }
 
 impl PieceBank {
     pub fn new() -> Self {
-        PieceBank {
-            pieces: HashMap::new(),
+        let mut pieces: HashMap<PieceType, Vec<Piece>> = HashMap::new();
+        let all_combos = Size::iter().cartesian_product(Color::iter());
+        let all_combos = all_combos.cartesian_product(0..=2);
+        for ((size, color), id) in all_combos {
+            let type_ = PieceType { color, size };
+            let piece = Piece { type_, id };
+            let entry = pieces.entry(piece.type_);
+            entry.or_default().push(piece);
         }
+
+        PieceBank { pieces }
     }
 
     pub fn pop_piece(&mut self, piece_type: &PieceType) -> Option<Piece> {
-        let piece_type_set: &mut _ = self.pieces.get_mut(piece_type)?;
-        let piece = *piece_type_set.iter().next()?;
-        piece_type_set.remove(&piece);
-        Some(piece)
+        let mut piece_type_vec = self.pieces.get_mut(piece_type);
+        // TODO figure out whether to treat this as an unrecoverable error in some other way than
+        // panicking.
+        piece_type_vec.unwrap().pop()
     }
 }

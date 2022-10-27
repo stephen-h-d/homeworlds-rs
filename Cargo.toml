@@ -8,3 +8,7 @@ edition = "2021"
 [dependencies]
 enumset = "1.0.12"
 derive-new = "0.5.9"
+strum = "0.24.1"
+strum_macros = "0.24.1"
+itertools = "0.10.5"
+array-init = "2.0.1"
