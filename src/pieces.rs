@@ -1,20 +1,21 @@
 use derive_new::new;
 use enumset::EnumSetType;
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-#[derive(Eq, PartialEq, PartialOrd, Debug, Hash, Copy, Clone, EnumIter)]
+#[derive(EnumSetType, PartialOrd, Debug, Hash, EnumIter)]
 pub enum Size {
     Small,
     Medium,
     Large,
 }
 
-// TODO consider using this crate https://crates.io/crates/strum
+// TODO consider using strum for this -- this was really just for me getting used to implementing
+// the Display trait
 impl fmt::Display for Size {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
@@ -115,7 +116,7 @@ impl PieceType {
     }
 }
 
-#[derive(new, Debug, Eq, Hash, PartialEq)]
+#[derive(new, Debug, Eq, Hash, PartialEq, Clone)]
 pub struct Piece {
     type_: PieceType,
     id: u8, // will be 0, 1, or 2 -- may want to change to an `enum`
@@ -146,6 +147,7 @@ impl fmt::Display for PieceType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PieceBank {
     pieces: HashMap<PieceType, Vec<Piece>>,
 }
