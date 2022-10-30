@@ -1,5 +1,6 @@
 use super::pieces::Piece;
 use enumset::EnumSet;
+use std::collections::HashMap;
 
 use crate::game_state::Action::Move;
 use crate::pieces::{Color, PieceBank, PieceType, Size};
@@ -145,11 +146,12 @@ impl Location for Homeworld {
 pub struct GameState {
     bank: PieceBank,
     homeworlds: [Homeworld; 2],
-    colonies: Vec<Colony>, // TODO change to ArrayVec
+    colonies: HashMap<u64, Colony>, // TODO change to array of Options
     current_player: Player,
-    // we use this to check whether it's one of the first two moves, but it will also be useful
+    // we use this to check whether it's one of the first two turns, but it will also be useful
     // information generally
-    move_count: u64,
+    turn_count: u64,
+    colony_id_counter: u64,
 }
 
 trait IsAction {}
@@ -208,7 +210,7 @@ enum Action {
 impl GameState {
     fn add_move_actions(&self, actions: &mut Vec<Action>) {
         let homeworld_iter = self.homeworlds.iter().map(|h| h as &dyn Location);
-        let colony_iter = self.colonies.iter().map(|c| c as &dyn Location);
+        let colony_iter = self.colonies.values().map(|c| c as &dyn Location);
         let location_iter = homeworld_iter.chain(colony_iter).into_iter();
         let location_iter_2 = location_iter.clone();
         let location_pairs = location_iter.cartesian_product(location_iter_2);
@@ -259,6 +261,7 @@ impl GameState {
 mod tests {
     use crate::game_state::{Action, GameState, Homeworld, MoveAction, OwnedPiece, Player};
     use crate::pieces::*;
+    use std::collections::HashMap;
 
     fn pop_option(bank: &mut PieceBank, type_: &PieceType) -> Option<Piece> {
         Some(bank.pop_piece(type_).unwrap())
@@ -297,9 +300,10 @@ mod tests {
                     id: 1,
                 },
             ],
-            colonies: vec![],
+            colonies: HashMap::new(),
             current_player: Player::First,
-            move_count: 0,
+            turn_count: 2,
+            colony_id_counter: 2,
         };
         let mut expected_move_state = game_state.clone();
         let ship = expected_move_state.homeworlds[0].ships.pop().unwrap();
