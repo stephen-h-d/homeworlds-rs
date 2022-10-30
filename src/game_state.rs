@@ -1,6 +1,7 @@
 use super::pieces::Piece;
 use enumset::EnumSet;
 use std::collections::HashMap;
+use std::iter::Flatten;
 
 use crate::game_state::Action::Move;
 use crate::pieces::{Color, PieceBank, PieceType, Size};
@@ -15,26 +16,14 @@ enum PieceLoc {
     Colony(Piece),
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 enum Player {
-    First,
-    Second,
+    First = 0,
+    Second = 1,
 }
 
 trait HasColors {
     fn colors(&self, player: &Player) -> EnumSet<Color>;
-}
-
-trait Location: HasColors {
-    fn sizes(&self) -> EnumSet<Size>;
-
-    fn reachable(&self, other: &dyn Location) -> bool {
-        self.sizes() & other.sizes() == EnumSet::empty()
-    }
-
-    fn ships(&self) -> &Vec<OwnedPiece>;
-
-    fn id(&self) -> u64;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,23 +56,84 @@ impl OwnedPiece {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct Homeworld {
+    stars: [Option<Piece>; 2],
+    ships: Vec<OwnedPiece>,
+    player: Player,
+}
+
+impl Homeworld {
+    fn remaining_stars(&self) -> Flatten<Iter<Option<Piece>>> {
+        self.stars.iter().flatten()
+    }
+
+    fn sizes(&self) -> EnumSet<Size> {
+        self.remaining_stars()
+            .map(|star| star.type_().size())
+            .fold(EnumSet::new(), |sizes, size| sizes | *size)
+    }
+
+    fn colors(&self) -> EnumSet<Color> {
+        self.remaining_stars()
+            .map(|star| star.type_().color())
+            .fold(EnumSet::new(), |colors, color| colors | *color)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Colony {
     star: Piece,
     ships: Vec<OwnedPiece>,
     id: u64,
 }
 
-impl Location for Colony {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum System<'a> {
+    Homeworld(&'a Homeworld),
+    Colony(&'a Colony),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SystemId {
+    Homeworld(Player),
+    Colony(u64),
+}
+
+impl<'a> System<'a> {
     fn sizes(&self) -> EnumSet<Size> {
-        EnumSet::from(*self.star.type_().size())
+        match self {
+            System::Colony(colony) => EnumSet::from(*colony.star.type_().size()),
+            System::Homeworld(homeworld) => homeworld.sizes(),
+        }
+    }
+
+    fn can_reach(&self, other: &System) -> bool {
+        self.sizes() & other.sizes() == EnumSet::empty()
     }
 
     fn ships(&self) -> &Vec<OwnedPiece> {
-        &self.ships
+        match self {
+            System::Homeworld(homeworld) => &homeworld.ships,
+            System::Colony(colony) => &colony.ships,
+        }
     }
 
-    fn id(&self) -> u64 {
-        self.id
+    fn id(&self) -> SystemId {
+        match self {
+            System::Homeworld(homeworld) => SystemId::Homeworld(homeworld.player),
+            System::Colony(colony) => SystemId::Colony(colony.id),
+        }
+    }
+}
+
+impl<'a> HasColors for System<'a> {
+    fn colors(&self, player: &Player) -> EnumSet<Color> {
+        match self {
+            System::Colony(colony) => {
+                EnumSet::from(*colony.star.type_().color()) | colony.ships.colors(player)
+            }
+            System::Homeworld(homeworld) => homeworld.colors() | homeworld.ships.colors(player),
+        }
     }
 }
 
@@ -97,56 +147,15 @@ impl HasColors for Vec<OwnedPiece> {
     }
 }
 
-impl HasColors for Colony {
-    fn colors(&self, player: &Player) -> EnumSet<Color> {
-        *self.star.type_().color() | self.ships.colors(player)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Homeworld {
-    // if there are no stars at a homeworld after the first two moves, the game is over, but we need
-    // to be able to represent the final game state and the first two game states
-    stars: [Option<Piece>; 2],
-    ships: Vec<OwnedPiece>,
-    id: u64,
-}
-
-impl HasColors for Homeworld {
-    fn colors(&self, player: &Player) -> EnumSet<Color> {
-        self.stars
-            .iter()
-            .flatten()
-            .fold(self.ships.colors(player), |colors, piece| {
-                colors | *piece.type_().color()
-            })
-    }
-}
-
-impl Location for Homeworld {
-    fn sizes(&self) -> EnumSet<Size> {
-        match &self.stars {
-            [Some(first), Some(second)] => *first.type_().size() | *second.type_().size(),
-            [Some(first), Option::None] => EnumSet::from(*first.type_().size()),
-            [Option::None, Some(second)] => EnumSet::from(*second.type_().size()),
-            [Option::None, Option::None] => EnumSet::new(),
-        }
-    }
-
-    fn ships(&self) -> &Vec<OwnedPiece> {
-        &self.ships
-    }
-
-    fn id(&self) -> u64 {
-        self.id
-    }
-}
+const HOMEWORLDS_COUNT: usize = 2;
+const MAX_COLONIES_COUNT: usize = 16;
+const MAX_SYSTEMS_COUNT: usize = HOMEWORLDS_COUNT + MAX_COLONIES_COUNT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameState {
     bank: PieceBank,
     homeworlds: [Homeworld; 2],
-    colonies: HashMap<u64, Colony>, // TODO change to array of Options
+    colonies: HashMap<u64, Colony>,
     current_player: Player,
     // we use this to check whether it's one of the first two turns, but it will also be useful
     // information generally
@@ -154,12 +163,115 @@ pub struct GameState {
     colony_id_counter: u64,
 }
 
+enum SystemsIterLoc<'a> {
+    Homeworlds(Player),
+    Colonies(std::collections::hash_map::Values<'a, u64, Colony>),
+}
+
+struct SystemsIter<'a> {
+    loc: SystemsIterLoc<'a>,
+    game_state: &'a GameState,
+}
+
+impl<'a> SystemsIter<'a> {
+    fn new(game_state: &'a GameState) -> Self {
+        SystemsIter {
+            loc: SystemsIterLoc::Homeworlds(Player::First),
+            game_state,
+        }
+    }
+}
+
+impl<'a> Iterator for SystemsIter<'a> {
+    type Item = System<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.loc {
+            SystemsIterLoc::Homeworlds(player) => {
+                let result = Some(System::Homeworld(
+                    // TODO figure out if there's a safer way to do this
+                    &self.game_state.homeworlds[*player as usize],
+                ));
+                match player {
+                    Player::First => self.loc = SystemsIterLoc::Homeworlds(Player::Second),
+                    Player::Second => {
+                        self.loc = SystemsIterLoc::Colonies(self.game_state.colonies.values())
+                    }
+                }
+                result
+            }
+            SystemsIterLoc::Colonies(iter) => {
+                if let Some(colony) = iter.next() {
+                    Some(System::Colony(colony))
+                } else {
+                    Option::None
+                }
+            }
+        }
+    }
+}
+
+impl GameState {
+    fn systems(&self) -> SystemsIter {
+        SystemsIter::new(self)
+    }
+
+    fn add_move_actions(&self, actions: &mut Vec<Action>) {
+        for src_location in self.systems() {
+            for dest_location in self.systems() {
+                let can_move = src_location
+                    .colors(&self.current_player)
+                    .contains(Color::Yellow);
+
+                if can_move && src_location.can_reach(&dest_location) {
+                    let ships_to_move = owned_by(src_location.ships(), &self.current_player);
+                    for ship in ships_to_move {
+                        let action = MoveAction {
+                            src_id: src_location.id(),
+                            dest_id: dest_location.id(),
+                            piece_type: *ship.piece.type_(),
+                        };
+                        // TODO this will cause some redundancy if two pieces of the same type are in
+                        // the same location and owned by the same player.  determine what to do about
+                        // this.
+                        actions.push(Action::Move(action));
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_capture_actions(&self, actions: &mut Vec<Action>) {
+        todo!()
+    }
+
+    fn add_trade_actions(&self, actions: &mut Vec<Action>) {
+        todo!()
+    }
+
+    fn add_build_actions(&self, actions: &mut Vec<Action>) {
+        todo!()
+    }
+
+    fn homeworld_for(&self, player: &Player) {}
+
+    pub fn valid_moves(&self) -> Vec<GameState> {
+        let mut result = Vec::new();
+        self.add_move_actions(&mut result);
+        self.add_capture_actions(&mut result);
+        self.add_trade_actions(&mut result);
+        self.add_build_actions(&mut result);
+        let mut result = vec![];
+        result
+    }
+}
+
 trait IsAction {}
 
 #[derive(Debug, PartialEq, Eq)]
 struct MoveAction {
-    src_id: u64,
-    dest_id: u64,
+    src_id: SystemId,
+    dest_id: SystemId,
     piece_type: PieceType,
 }
 
@@ -205,62 +317,13 @@ enum Action {
     Trade(TradeAction),
     Capture(CaptureAction),
     Sacrifice(SacrificeAction),
-}
-
-impl GameState {
-    fn add_move_actions(&self, actions: &mut Vec<Action>) {
-        let homeworld_iter = self.homeworlds.iter().map(|h| h as &dyn Location);
-        let colony_iter = self.colonies.values().map(|c| c as &dyn Location);
-        let location_iter = homeworld_iter.chain(colony_iter).into_iter();
-        let location_iter_2 = location_iter.clone();
-        let location_pairs = location_iter.cartesian_product(location_iter_2);
-        for (src_location, dest_location) in location_pairs {
-            let can_move = src_location
-                .colors(&self.current_player)
-                .contains(Color::Yellow);
-            if can_move && src_location.reachable(dest_location) {
-                let ships_to_move = owned_by(src_location.ships(), &self.current_player);
-                for ship in ships_to_move {
-                    let action = MoveAction {
-                        src_id: src_location.id(),
-                        dest_id: dest_location.id(),
-                        piece_type: *ship.piece.type_(),
-                    };
-                    // TODO this will cause some redundancy if two pieces of the same type are in
-                    // the same location and owned by the same player.  determine what to do about
-                    // this.
-                    actions.push(Action::Move(action));
-                }
-            }
-        }
-    }
-
-    fn add_capture_actions(&self, actions: &mut Vec<Action>) {
-        todo!()
-    }
-
-    fn add_trade_actions(&self, actions: &mut Vec<Action>) {
-        todo!()
-    }
-
-    fn add_build_actions(&self, actions: &mut Vec<Action>) {
-        todo!()
-    }
-
-    pub fn valid_moves(&self) -> Vec<GameState> {
-        let mut result = Vec::new();
-        self.add_move_actions(&mut result);
-        self.add_capture_actions(&mut result);
-        self.add_trade_actions(&mut result);
-        self.add_build_actions(&mut result);
-        let mut result = vec![];
-        result
-    }
+    // TODO add catastrophe
 }
 
 mod tests {
-    use crate::game_state::{Action, GameState, Homeworld, MoveAction, OwnedPiece, Player};
+    use crate::game_state::*;
     use crate::pieces::*;
+    use std::borrow::{Borrow, BorrowMut};
     use std::collections::HashMap;
 
     fn pop_option(bank: &mut PieceBank, type_: &PieceType) -> Option<Piece> {
@@ -274,6 +337,7 @@ mod tests {
     #[test]
     fn do_a_thing() {
         let mut bank = PieceBank::new();
+        let mut systems: [Option<System>; MAX_SYSTEMS_COUNT] = Default::default();
 
         let hw1_stars = [
             pop_option(&mut bank, &SMALL_RED),
@@ -292,28 +356,25 @@ mod tests {
                 Homeworld {
                     stars: hw1_stars,
                     ships: vec![hw1_ship],
-                    id: 0,
+                    player: Player::First,
                 },
                 Homeworld {
                     stars: hw2_stars,
                     ships: vec![hw2_ship],
-                    id: 1,
+                    player: Player::Second,
                 },
             ],
             colonies: HashMap::new(),
             current_player: Player::First,
-            turn_count: 2,
-            colony_id_counter: 2,
+            turn_count: 0,
+            colony_id_counter: 0,
         };
-        let mut expected_move_state = game_state.clone();
-        let ship = expected_move_state.homeworlds[0].ships.pop().unwrap();
-        expected_move_state.homeworlds[1].ships.push(ship);
 
         let mut move_actions = vec![];
         game_state.add_move_actions(&mut move_actions);
         let expected_actions = vec![Action::Move(MoveAction {
-            src_id: 0,
-            dest_id: 1,
+            src_id: SystemId::Homeworld(Player::First),
+            dest_id: SystemId::Homeworld(Player::Second),
             piece_type: LARGE_GREEN,
         })];
         assert_eq!(expected_actions, move_actions);
