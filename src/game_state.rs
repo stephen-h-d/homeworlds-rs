@@ -7,6 +7,7 @@ use crate::game_state::Action::Move;
 use crate::pieces::{Color, PieceBank, PieceType, Size};
 use itertools::Itertools;
 use std::slice::Iter;
+use strum::IntoEnumIterator;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PieceLoc {
@@ -99,6 +100,12 @@ enum SystemId {
     Colony(u64),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum DestId {
+    Sys(SystemId),
+    NewColony(PieceType),
+}
+
 impl<'a> System<'a> {
     fn sizes(&self) -> EnumSet<Size> {
         match self {
@@ -161,6 +168,7 @@ pub struct GameState {
     // information generally
     turn_count: u64,
     colony_id_counter: u64,
+    avail_std_actions: (AvailableStdAction, u8),
 }
 
 enum SystemsIterLoc<'a> {
@@ -216,27 +224,53 @@ impl GameState {
         SystemsIter::new(self)
     }
 
-    fn add_move_actions(&self, actions: &mut Vec<Action>) {
-        for src_location in self.systems() {
-            for dest_location in self.systems() {
-                let can_move = src_location
-                    .colors(&self.current_player)
-                    .contains(Color::Yellow);
+    fn add_move_curr_cols(&self, actions: &mut Vec<Action>, src_location: &System) {
+        for dest_location in self.systems() {
+            if src_location.can_reach(&dest_location) {
+                let ships_to_move = owned_by(src_location.ships(), &self.current_player);
+                for ship in ships_to_move {
+                    let action = MoveAction {
+                        src_id: src_location.id(),
+                        dest_id: DestId::Sys(dest_location.id()),
+                        piece_type: *ship.piece.type_(),
+                    };
+                    // TODO this will cause some redundancy if two pieces of the same type are in
+                    // the same location and owned by the same player.  determine what to do about
+                    // this.
+                    actions.push(Move(action));
+                }
+            }
+        }
+    }
 
-                if can_move && src_location.can_reach(&dest_location) {
+    fn add_move_new_cols(&self, actions: &mut Vec<Action>, src_location: &System) {
+        let avail_dest_sizes = Size::all_sizes() ^ src_location.sizes();
+        for avail_dest_size in avail_dest_sizes {
+            for color in Color::iter() {
+                let destination_piece = PieceType::new(avail_dest_size, color);
+                if self.bank.contains(destination_piece) {
                     let ships_to_move = owned_by(src_location.ships(), &self.current_player);
                     for ship in ships_to_move {
                         let action = MoveAction {
                             src_id: src_location.id(),
-                            dest_id: dest_location.id(),
+                            dest_id: DestId::NewColony(destination_piece),
                             piece_type: *ship.piece.type_(),
                         };
-                        // TODO this will cause some redundancy if two pieces of the same type are in
-                        // the same location and owned by the same player.  determine what to do about
-                        // this.
-                        actions.push(Action::Move(action));
+                        actions.push(Move(action));
                     }
                 }
+            }
+        }
+    }
+
+    fn add_move_actions(&self, actions: &mut Vec<Action>) {
+        for src_location in self.systems() {
+            let can_move = src_location
+                .colors(&self.current_player)
+                .contains(Color::Yellow);
+            if can_move {
+                self.add_move_curr_cols(actions, &src_location);
+                self.add_move_new_cols(actions, &src_location);
             }
         }
     }
@@ -271,7 +305,7 @@ trait IsAction {}
 #[derive(Debug, PartialEq, Eq)]
 struct MoveAction {
     src_id: SystemId,
-    dest_id: SystemId,
+    dest_id: DestId,
     piece_type: PieceType,
 }
 
@@ -293,19 +327,23 @@ struct CaptureAction {}
 impl IsAction for CaptureAction {}
 
 #[derive(Debug, PartialEq, Eq)]
-enum SacrificeAction {
-    SmallRed(Piece, Option<CaptureAction>),
-    MediumRed(Piece, [Option<CaptureAction>; 2]),
-    LargeRed(Piece, [Option<CaptureAction>; 3]),
-    SmallBlue(Piece, Option<TradeAction>),
-    MediumBlue(Piece, [Option<TradeAction>; 2]),
-    LargeBlue(Piece, [Option<TradeAction>; 3]),
-    SmallGreen(Piece, Option<BuildAction>),
-    MediumGreen(Piece, [Option<BuildAction>; 2]),
-    LargeGreen(Piece, [Option<BuildAction>; 3]),
-    SmallYellow(Piece, Option<MoveAction>),
-    MediumYellow(Piece, [Option<MoveAction>; 2]),
-    LargeYellow(Piece, [Option<MoveAction>; 3]),
+struct CatastropheAction {}
+
+impl IsAction for CatastropheAction {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AvailableStdAction {
+    Any, // any means any of the below in addition to sacrifice
+    Capture,
+    Build,
+    Trade,
+    Move,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SacrificeAction {
+    piece_type: PieceType,
+    location: SystemId,
 }
 
 impl IsAction for SacrificeAction {}
@@ -317,7 +355,7 @@ enum Action {
     Trade(TradeAction),
     Capture(CaptureAction),
     Sacrifice(SacrificeAction),
-    // TODO add catastrophe
+    Catastrophe(CatastropheAction),
 }
 
 mod tests {
@@ -326,11 +364,11 @@ mod tests {
     use std::borrow::{Borrow, BorrowMut};
     use std::collections::HashMap;
 
-    fn pop_option(bank: &mut PieceBank, type_: &PieceType) -> Option<Piece> {
+    fn pop_option(bank: &mut PieceBank, type_: PieceType) -> Option<Piece> {
         Some(bank.pop_piece(type_).unwrap())
     }
 
-    fn pop(bank: &mut PieceBank, type_: &PieceType) -> Piece {
+    fn pop(bank: &mut PieceBank, type_: PieceType) -> Piece {
         bank.pop_piece(type_).unwrap()
     }
 
@@ -340,15 +378,15 @@ mod tests {
         let mut systems: [Option<System>; MAX_SYSTEMS_COUNT] = Default::default();
 
         let hw1_stars = [
-            pop_option(&mut bank, &SMALL_RED),
-            pop_option(&mut bank, &SMALL_YELLOW),
+            pop_option(&mut bank, SMALL_RED),
+            pop_option(&mut bank, SMALL_YELLOW),
         ];
-        let hw1_ship = OwnedPiece::first(pop(&mut bank, &LARGE_GREEN));
+        let hw1_ship = OwnedPiece::first(pop(&mut bank, LARGE_GREEN));
         let hw2_stars = [
-            pop_option(&mut bank, &MEDIUM_BLUE),
-            pop_option(&mut bank, &LARGE_RED),
+            pop_option(&mut bank, MEDIUM_BLUE),
+            pop_option(&mut bank, LARGE_RED),
         ];
-        let hw2_ship = OwnedPiece::second(pop(&mut bank, &LARGE_GREEN));
+        let hw2_ship = OwnedPiece::second(pop(&mut bank, LARGE_GREEN));
 
         let game_state = GameState {
             bank,
@@ -368,15 +406,58 @@ mod tests {
             current_player: Player::First,
             turn_count: 0,
             colony_id_counter: 0,
+            avail_std_actions: (AvailableStdAction::Any, 1),
         };
 
         let mut move_actions = vec![];
         game_state.add_move_actions(&mut move_actions);
-        let expected_actions = vec![Action::Move(MoveAction {
-            src_id: SystemId::Homeworld(Player::First),
-            dest_id: SystemId::Homeworld(Player::Second),
-            piece_type: LARGE_GREEN,
-        })];
+        let expected_actions = vec![
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::Sys(SystemId::Homeworld(Player::Second)),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(MEDIUM_RED),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(MEDIUM_GREEN),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(MEDIUM_BLUE),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(MEDIUM_YELLOW),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(LARGE_RED),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(LARGE_GREEN),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(LARGE_BLUE),
+                piece_type: LARGE_GREEN,
+            }),
+            Move(MoveAction {
+                src_id: SystemId::Homeworld(Player::First),
+                dest_id: DestId::NewColony(LARGE_YELLOW),
+                piece_type: LARGE_GREEN,
+            }),
+        ];
         assert_eq!(expected_actions, move_actions);
     }
 }

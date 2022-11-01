@@ -1,4 +1,5 @@
 use derive_new::new;
+use enumset::EnumSet;
 use enumset::EnumSetType;
 use itertools::Itertools;
 use std::collections::HashMap;
@@ -12,6 +13,12 @@ pub enum Size {
     Small,
     Medium,
     Large,
+}
+
+impl Size {
+    pub fn all_sizes() -> EnumSet<Size> {
+        Size::Small | Size::Medium | Size::Large
+    }
 }
 
 // TODO consider using strum for this -- this was really just for me getting used to implementing
@@ -167,10 +174,14 @@ impl PieceBank {
         PieceBank { pieces }
     }
 
-    pub fn pop_piece(&mut self, piece_type: &PieceType) -> Option<Piece> {
-        let mut piece_type_vec = self.pieces.get_mut(piece_type);
+    pub fn pop_piece(&mut self, piece_type: PieceType) -> Option<Piece> {
+        let mut piece_type_vec = self.pieces.get_mut(&piece_type);
         // TODO figure out whether to treat this as an unrecoverable error in some other way than
         // panicking.
         piece_type_vec.unwrap().pop()
+    }
+
+    pub fn contains(&self, piece_type: PieceType) -> bool {
+        self.pieces.contains_key(&piece_type)
     }
 }
